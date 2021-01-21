@@ -24,25 +24,36 @@ def get_daily():
     # datetime转字符串
     show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
     basepath = os.path.dirname(__file__)
+    # 存储csv文件
     csv_name = show_time + ".csv"
     cvspath = os.path.join(basepath,'static/csv/' + csv_name)
-#    basePath = "csv/daily/"
     stock.to_csv(cvspath,encoding = 'utf-8',index=None)
-    # 转为json存储
+    # 存储excel文件
+    excel_name = show_time + ".xlsx"
+    excelpath = os.path.join(basepath,'static/excel/' + excel_name)
+    stock.to_excel(excelpath,encoding = 'utf-8',index=None)
+    # 存储json文件
     json_name = show_time + ".json"
     josnpath = os.path.join(basepath,'static/json/' + json_name)
-    json_file = open(josnpath, 'w+', encoding='utf-8')
-    csv_file = open(cvspath, 'r', encoding='utf-8')
-    ls=[]
-    for line in csv_file:
-        line=line.replace("\n","")
-        ls.append(line.split(","))
-    csv_file.close()
-    for i in range(1,len(ls)):
-        ls[i]=dict(zip(ls[0],ls[i]))
-    b = json.dumps(ls[1:],sort_keys=True,indent=4,ensure_ascii=False)
-    json_file.write(b)
-    json_file.close()
+    result = stock.to_json(orient="records")
+    parsed = json.loads(result)
+    with open(josnpath,'w+',encoding="utf-8") as write_j:
+        write_j.write(json.dumps(parsed, indent=4))
+#    stock.to_json(josnpath)
+#    json_name = show_time + ".json"
+#    josnpath = os.path.join(basepath,'static/json/' + json_name)
+#    json_file = open(josnpath, 'w+', encoding='utf-8')
+#    csv_file = open(cvspath, 'r', encoding='utf-8')
+#    ls=[]
+#    for line in csv_file:
+#        line=line.replace("\n","")
+#        ls.append(line.split(","))
+#    csv_file.close()
+#    for i in range(1,len(ls)):
+#        ls[i]=dict(zip(ls[0],ls[i]))
+#    b = json.dumps(ls[1:],sort_keys=True,indent=4,ensure_ascii=False)
+#    json_file.write(b)
+#    json_file.close()
     return "save-ok"
     
 
@@ -72,3 +83,4 @@ if __name__ =="__main__":
         port= 5005,
         debug=True
     )
+
