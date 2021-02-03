@@ -19,6 +19,26 @@ pro = ts.pro_api()
 # baostock相关设置
 lg = bs.login()
 
+# 公共方法
+def get_file_exist(i, j):
+    basepath = os.path.dirname(__file__)
+    if j == 'main':
+        childpath = os.path.join(basepath,i)
+    elif j == 'csv':
+        childpath = os.path.join(basepath,i + '/csv')
+    elif j == 'excel':
+        childpath = os.path.join(basepath,i + '/excel')
+    elif j == 'json':
+        childpath = os.path.join(basepath,i + '/json')
+    elif j == 'factor':
+        childpath = os.path.join(basepath,i + '/factor')
+    isFile = os.path.exists(childpath)
+    if isFile:
+        return '1'
+    else:
+        os.makedirs(childpath)
+        return '0'
+
 @app.route('/stock/get_daily', methods=['POST', 'GET'])
 # 获取所有股票当日数据（all）——tushare
 def get_daily():
@@ -79,6 +99,8 @@ def get_stock_basic():
         begin = param['begin']
     if param['end']:
         end = param['end']
+    if param['page_size']:
+        page_size = int(param['page_size'])
     stock = pro.daily(ts_code=code, start_date=begin, end_date=end)
     basepath = os.path.dirname(__file__)
     basicpath = 'static/perstock/' + code
@@ -101,34 +123,49 @@ def get_stock_basic():
     excelpath = os.path.join(basepath,basicpath + '/excel/' + excel_name)
     stock.to_excel(excelpath,encoding = 'utf-8',index=None)
     # 转为json存储
+    save_file = {"data": []}
     json_name = code + "_" + show_time + ".json"
     josnpath = os.path.join(basepath,basicpath + '/json/' + json_name)
     result = stock.to_json(orient="records")
     parsed = json.loads(result)
+    save_file["data"] = parsed
     with open(josnpath,'w+',encoding="utf-8") as write_j:
-        write_j.write(json.dumps(parsed, indent=4))
-    return "ok-per"
+        write_j.write(json.dumps(save_file, indent=4))
+    # 从json获取数据（首页默认展示n条数据）
+    all_len = len(parsed)
+    show_data = parsed[0:page_size]
+    show_obj = {"data": show_data, "total": all_len, "type": "searchPer"}
+    return show_obj
 
-def get_file_exist(i, j):
+@app.route('/stock/get_stock_basic_page', methods=['POST', 'GET'])
+# 分页，查询某一时间段个股数据（未复权行情）——tushare
+def get_stock_basic_page():
+    param = request.form;
+    if param['code']:
+        # 600519.SH
+        code = param['code']
+    if param['page_no']:
+        page_no = int(param['page_no'])
+    if param['page_size']:
+        page_size = int(param['page_size'])
     basepath = os.path.dirname(__file__)
-    if j == 'main':
-        childpath = os.path.join(basepath,i)
-    elif j == 'csv':
-        childpath = os.path.join(basepath,i + '/csv')
-    elif j == 'excel':
-        childpath = os.path.join(basepath,i + '/excel')
-    elif j == 'json':
-        childpath = os.path.join(basepath,i + '/json')
-    elif j == 'factor':
-        childpath = os.path.join(basepath,i + '/factor')
-    isFile = os.path.exists(childpath)
-    if isFile:
-        return '1'
-    else:
-        os.makedirs(childpath)
-        return '0'
+    basicpath = 'static/perstock/' + code
+    today = datetime.date.today()
+    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    json_name = code + "_" + show_time + ".json"
+    josnpath = os.path.join(basepath,basicpath + '/json/' + json_name)
+    data_file = open(josnpath,'r+',encoding="utf-8")
+    all_info = json.loads(data_file.read(), strict=False)
+    all_data = all_info['data']
+    all_len = len(all_data)
+    start = page_size * (page_no - 1)
+    end = page_size * page_no
+    res = all_data[start:end]
+    show_obj = {"data": res, "total": all_len, "type": "columnList"}
+    return show_obj
 
-# 查询复权因子（某天）权限限制——tushare
+
+# 查询复权因子(积分权限限制未使用——tushare)
 def get_adj_factors():
     param = request.form;
     if param['code']:
@@ -152,11 +189,11 @@ def get_adj_factors():
     return 'save-factor'
 
 @app.route('/stock/get_adj_factor', methods=['POST', 'GET'])
-# 查询复权因子（不定期）权限限制——baostock(sh.600000,2015-01-01)
+# 查询复权因子（不定期）——baostock(sh.600000,2015-01-01)
 def get_adj_factor():
     param = request.form;
     if param['code']:
-        # sh.600000
+        # sh.600000(600000.SH)
         code = param['code']
     if param['begin']:
         # 2015-01-01
@@ -165,7 +202,9 @@ def get_adj_factor():
         # 2015-01-01
         end = param['end']
     rs_list = []
-    rs_factor = bs.query_adjust_factor(code=code, start_date=begin,end_date=end)
+    codelist = code.split('.', 1 )
+    show_code = codelist[1].lower() + '.' + codelist[0]
+    rs_factor = bs.query_adjust_factor(code=show_code, start_date=begin,end_date=end)
     while (rs_factor.error_code == '0') & rs_factor.next():
         rs_list.append(rs_factor.get_row_data())
     result_factor = pd.DataFrame(rs_list, columns=rs_factor.fields)
@@ -186,7 +225,9 @@ def get_adj_factor():
     parsed = json.loads(result)
     with open(josnpath,'w+',encoding="utf-8") as write_j:
         write_j.write(json.dumps(parsed, indent=4))
-    return 'save-factor'
+    all_len = len(parsed)
+    show_obj = {"data": parsed, "total": all_len, "type": "factorList"}
+    return show_obj
 
 
 if __name__ =="__main__":
