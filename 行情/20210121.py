@@ -5,6 +5,7 @@ import os
 import shutil
 import pandas as pd
 import tushare as ts
+import baostock as bs
 import datetime
 import time
 import threading
@@ -12,12 +13,14 @@ import csv
 import json
 
 app = Flask(__name__)
-# tushare相关设置（token需要自己获取）
+# tushare相关设置
 ts.set_token("***")
 pro = ts.pro_api()
+# baostock相关设置
+lg = bs.login()
 
 @app.route('/stock/get_daily', methods=['POST', 'GET'])
-# 获取所有股票当日数据（all）
+# 获取所有股票当日数据（all）——tushare
 def get_daily():
     stock = ts.get_today_all()
     # 给数据添加一个日期
@@ -65,15 +68,14 @@ def sleep_daily():
             time.sleep(86400-int(now_min)*60)
             
 @app.route('/stock/get_stock_basic', methods=['POST', 'GET'])
-# 查询某一时间段个股数据（未复权行情）
+# 查询某一时间段个股数据（未复权行情）——tushare
 def get_stock_basic():
-#    code = "600519.SH"
-#    begin = "20210120"
-#    end = "20210121"
     param = request.form;
     if param['code']:
+        # 600519.SH
         code = param['code']
     if param['begin']:
+        # 20210121
         begin = param['begin']
     if param['end']:
         end = param['end']
@@ -117,12 +119,74 @@ def get_file_exist(i, j):
         childpath = os.path.join(basepath,i + '/excel')
     elif j == 'json':
         childpath = os.path.join(basepath,i + '/json')
+    elif j == 'factor':
+        childpath = os.path.join(basepath,i + '/factor')
     isFile = os.path.exists(childpath)
     if isFile:
         return '1'
     else:
         os.makedirs(childpath)
         return '0'
+
+# 查询复权因子（某天）权限限制——tushare
+def get_adj_factors():
+    param = request.form;
+    if param['code']:
+        code = param['code']
+    if param['date']:
+        date = param['date']
+    stock = pro.adj_factor(ts_code=code, trade_date=date)
+    basepath = os.path.dirname(__file__)
+    basicpath = 'static/perstock/' + code
+    today = datetime.date.today()
+    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    fileFlag = get_file_exist(basicpath, 'main')
+    factorFlag = get_file_exist(basicpath, 'factor')
+    # 转为json存储
+    json_name = code + "_" + show_time + ".json"
+    josnpath = os.path.join(basepath,basicpath + '/factor/' + json_name)
+    result = stock.to_json(orient="records")
+    parsed = json.loads(result)
+    with open(josnpath,'w+',encoding="utf-8") as write_j:
+        write_j.write(json.dumps(parsed, indent=4))
+    return 'save-factor'
+
+@app.route('/stock/get_adj_factor', methods=['POST', 'GET'])
+# 查询复权因子（不定期）权限限制——baostock(sh.600000,2015-01-01)
+def get_adj_factor():
+    param = request.form;
+    if param['code']:
+        # sh.600000
+        code = param['code']
+    if param['begin']:
+        # 2015-01-01
+        begin = param['begin']
+    if param['end']:
+        # 2015-01-01
+        end = param['end']
+    rs_list = []
+    rs_factor = bs.query_adjust_factor(code=code, start_date=begin,end_date=end)
+    while (rs_factor.error_code == '0') & rs_factor.next():
+        rs_list.append(rs_factor.get_row_data())
+    result_factor = pd.DataFrame(rs_list, columns=rs_factor.fields)
+    # 保存路径
+    basepath = os.path.dirname(__file__)
+    basicpath = 'static/perstock/' + code
+    today = datetime.date.today()
+    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    fileFlag = get_file_exist(basicpath, 'main')
+    factorFlag = get_file_exist(basicpath, 'factor')
+    csv_name = code + "_" + show_time + ".csv"
+    cvspath = os.path.join(basepath,basicpath + '/factor/' + csv_name)
+    result_factor.to_csv(cvspath, encoding="gbk", index=False)
+    # 转为json存储
+    json_name = code + "_" + show_time + ".json"
+    josnpath = os.path.join(basepath,basicpath + '/factor/' + json_name)
+    result = result_factor.to_json(orient="records")
+    parsed = json.loads(result)
+    with open(josnpath,'w+',encoding="utf-8") as write_j:
+        write_j.write(json.dumps(parsed, indent=4))
+    return 'save-factor'
 
 
 if __name__ =="__main__":
