@@ -12,3 +12,5 @@ Stock related Python code
 ## 新增接口get_stock_basic，用于查询个股某段时间内复权因子
 参考来源：http://baostock.com/baostock/index.php/%E5%A4%8D%E6%9D%83%E5%9B%A0%E5%AD%90%E4%BF%A1%E6%81%AF
 ## 新增个股查询分页接口
+## 新增相关项目代码vue3-no-ts
+
