@@ -20,6 +20,7 @@ pro = ts.pro_api()
 lg = bs.login()
 
 # 公共方法
+# 文件夹是否存在，不存在则创建
 def get_file_exist(i, j):
     basepath = os.path.dirname(__file__)
     if j == 'main':
@@ -38,6 +39,46 @@ def get_file_exist(i, j):
     else:
         os.makedirs(childpath)
         return '0'
+        
+# 股票拼接规则修改（baostock）：600000.SH改为sh.600000
+def stock_com(code):
+    codelist = code.split('.', 1 )
+    show_code = codelist[1].lower() + '.' + codelist[0]
+    return show_code
+    
+# 获取当前时间，数据保存名称中使用（per）
+def today_time():
+    today = datetime.date.today()
+    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    return show_time
+
+# 存储csv文件
+def save_csv(name,stock):
+    basepath = os.path.dirname(__file__)
+    cvspath = os.path.join(basepath,name)
+    stock.to_csv(cvspath,encoding = 'utf-8',index=None)
+    
+# 存储excel
+def save_excel(name, stock):
+    basepath = os.path.dirname(__file__)
+    excelpath = os.path.join(basepath,name)
+    stock.to_excel(excelpath,encoding = 'utf-8',index=None)
+
+# 存储json
+def save_json(name, stock, type):
+    basepath = os.path.dirname(__file__)
+    josnpath = os.path.join(basepath,name)
+    result = stock.to_json(orient="records")
+    parsed = json.loads(result)
+    if type == 'data':
+        save_file = {"data": []}
+        save_file["data"] = parsed
+        with open(josnpath,'w+',encoding="utf-8") as write_j:
+            write_j.write(json.dumps(save_file, indent=4))
+    else:
+        with open(josnpath,'w+',encoding="utf-8") as write_j:
+            write_j.write(json.dumps(parsed, indent=4))
+    return parsed
 
 @app.route('/stock/get_daily', methods=['POST', 'GET'])
 # 获取所有股票当日数据（all）——tushare
@@ -46,25 +87,18 @@ def get_daily():
     # 给数据添加一个日期
     stock['date'] = datetime.date.today()
     # 导出CSV格式的文件，原因有两个，一是pandas处理CSV格式的文件远比Excel快，二是Excel有最大行数限制，只能有104w行数据，而CSV没有这个限制
-    today = datetime.date.today()
-    # datetime转字符串
-    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    # 当前时间
+    show_time = today_time()
     basepath = os.path.dirname(__file__)
     # 存储csv文件
-    csv_name = show_time + ".csv"
-    cvspath = os.path.join(basepath,'static/allstock/csv/' + csv_name)
-    stock.to_csv(cvspath,encoding = 'utf-8',index=None)
+    csv_name = 'static/allstock/csv/' + show_time + '.csv'
+    save_csv(csv_name, stock)
     # 存储excel文件
-    excel_name = show_time + ".xlsx"
-    excelpath = os.path.join(basepath,'static/allstock/excel/' + excel_name)
-    stock.to_excel(excelpath,encoding = 'utf-8',index=None)
+    excel_name = 'static/allstock/excel/' + show_time + ".xlsx"
+    save_excel(excel_name, stock)
     # 转为json存储
-    json_name = show_time + ".json"
-    josnpath = os.path.join(basepath,'static/allstock/json/' + json_name)
-    result = stock.to_json(orient="records")
-    parsed = json.loads(result)
-    with open(josnpath,'w+',encoding="utf-8") as write_j:
-        write_j.write(json.dumps(parsed, indent=4))
+    json_name = 'static/allstock/json/' + show_time + ".json"
+    parsed = save_json(json_name, stock, 'com')
     return "save-ok"
     
 
@@ -104,8 +138,9 @@ def get_stock_basic():
     stock = pro.daily(ts_code=code, start_date=begin, end_date=end)
     basepath = os.path.dirname(__file__)
     basicpath = 'static/perstock/' + code
-    today = datetime.date.today()
-    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+#    today = datetime.date.today()
+#    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    show_time = today_time()
     # 创建个股文件夹
     fileFlag = get_file_exist(basicpath, 'main')
     if fileFlag == '0':
@@ -115,22 +150,14 @@ def get_stock_basic():
             if excelFlag == '0':
                 josnFlag = get_file_exist(basicpath, 'json')
     # 存储csv文件
-    csv_name = code + "_" + show_time + ".csv"
-    cvspath = os.path.join(basepath,basicpath + '/csv/' + csv_name)
-    stock.to_csv(cvspath,encoding = 'utf-8',index=None)
+    csv_name = basicpath + '/csv/' + code + '_' + show_time + '.csv'
+    save_csv(csv_name, stock)
     # 存储excel文件
-    excel_name = code + "_" + show_time + ".xlsx"
-    excelpath = os.path.join(basepath,basicpath + '/excel/' + excel_name)
-    stock.to_excel(excelpath,encoding = 'utf-8',index=None)
+    excel_name = basicpath + '/excel/' + code + "_" + show_time + ".xlsx"
+    save_excel(excel_name, stock)
     # 转为json存储
-    save_file = {"data": []}
-    json_name = code + "_" + show_time + ".json"
-    josnpath = os.path.join(basepath,basicpath + '/json/' + json_name)
-    result = stock.to_json(orient="records")
-    parsed = json.loads(result)
-    save_file["data"] = parsed
-    with open(josnpath,'w+',encoding="utf-8") as write_j:
-        write_j.write(json.dumps(save_file, indent=4))
+    json_name = basicpath + '/json/' + code + "_" + show_time + ".json"
+    parsed = save_json(json_name,stock,'data')
     # 从json获取数据（首页默认展示n条数据）
     all_len = len(parsed)
     show_data = parsed[0:page_size]
@@ -150,8 +177,9 @@ def get_stock_basic_page():
         page_size = int(param['page_size'])
     basepath = os.path.dirname(__file__)
     basicpath = 'static/perstock/' + code
-    today = datetime.date.today()
-    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+#    today = datetime.date.today()
+#    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    show_time = today_time()
     json_name = code + "_" + show_time + ".json"
     josnpath = os.path.join(basepath,basicpath + '/json/' + json_name)
     data_file = open(josnpath,'r+',encoding="utf-8")
@@ -175,17 +203,14 @@ def get_adj_factors():
     stock = pro.adj_factor(ts_code=code, trade_date=date)
     basepath = os.path.dirname(__file__)
     basicpath = 'static/perstock/' + code
-    today = datetime.date.today()
-    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+#    today = datetime.date.today()
+#    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    show_time = today_time()
     fileFlag = get_file_exist(basicpath, 'main')
     factorFlag = get_file_exist(basicpath, 'factor')
     # 转为json存储
-    json_name = code + "_" + show_time + ".json"
-    josnpath = os.path.join(basepath,basicpath + '/factor/' + json_name)
-    result = stock.to_json(orient="records")
-    parsed = json.loads(result)
-    with open(josnpath,'w+',encoding="utf-8") as write_j:
-        write_j.write(json.dumps(parsed, indent=4))
+    json_name = basicpath + '/factor/' + code + "_" + show_time + ".json"
+    parsed = save_json(json_name,stock,'com')
     return 'save-factor'
 
 @app.route('/stock/get_adj_factor', methods=['POST', 'GET'])
@@ -202,8 +227,7 @@ def get_adj_factor():
         # 2015-01-01
         end = param['end']
     rs_list = []
-    codelist = code.split('.', 1 )
-    show_code = codelist[1].lower() + '.' + codelist[0]
+    show_code = stock_com(code)
     rs_factor = bs.query_adjust_factor(code=show_code, start_date=begin,end_date=end)
     while (rs_factor.error_code == '0') & rs_factor.next():
         rs_list.append(rs_factor.get_row_data())
@@ -211,23 +235,31 @@ def get_adj_factor():
     # 保存路径
     basepath = os.path.dirname(__file__)
     basicpath = 'static/perstock/' + code
-    today = datetime.date.today()
-    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+#    today = datetime.date.today()
+#    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
+    show_time = today_time()
     fileFlag = get_file_exist(basicpath, 'main')
     factorFlag = get_file_exist(basicpath, 'factor')
-    csv_name = code + "_" + show_time + ".csv"
-    cvspath = os.path.join(basepath,basicpath + '/factor/' + csv_name)
-    result_factor.to_csv(cvspath, encoding="gbk", index=False)
+    csv_name = basicpath + '/factor/' + code + '_' + show_time + '.csv'
+    save_csv(csv_name, result_factor)
     # 转为json存储
-    json_name = code + "_" + show_time + ".json"
-    josnpath = os.path.join(basepath,basicpath + '/factor/' + json_name)
-    result = result_factor.to_json(orient="records")
-    parsed = json.loads(result)
-    with open(josnpath,'w+',encoding="utf-8") as write_j:
-        write_j.write(json.dumps(parsed, indent=4))
+    json_name = basicpath + '/factor/' + code + "_" + show_time + ".json"
+    parsed = save_json(json_name,result_factor, 'com')
     all_len = len(parsed)
     show_obj = {"data": parsed, "total": all_len, "type": "factorList"}
     return show_obj
+    
+@app.route('/stock/get_per_k_data', methods=['POST', 'GET'])
+# 查询个股（A股）k线——baostock(sh.600000,2015-01-01)
+def get_per_k_data():
+    param = request.form;
+    if param['code']:
+        # sh.600000(600000.SH)
+        code = param['code']
+    if param['begin']:
+        # 2015-01-01
+        begin = param['begin']
+    
 
 
 if __name__ =="__main__":
