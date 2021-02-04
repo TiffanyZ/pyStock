@@ -14,3 +14,5 @@ Stock related Python code
 ## 新增个股查询分页接口
 ## 新增相关项目代码vue3-no-ts
 
+2021-02-04
+## 方法整理，提取部分方法
