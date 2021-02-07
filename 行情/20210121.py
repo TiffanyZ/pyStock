@@ -11,13 +11,13 @@ import time
 import threading
 import csv
 import json
+# 实时行情
+import urllib
 
 app = Flask(__name__)
 # tushare相关设置
 ts.set_token("***")
 pro = ts.pro_api()
-# baostock相关设置
-lg = bs.login()
 
 # 公共方法
 # 文件夹是否存在，不存在则创建
@@ -33,12 +33,24 @@ def get_file_exist(i, j):
         childpath = os.path.join(basepath,i + '/json')
     elif j == 'factor':
         childpath = os.path.join(basepath,i + '/factor')
+    elif j == 'k':
+        childpath = os.path.join(basepath,i + '/k')
     isFile = os.path.exists(childpath)
     if isFile:
         return '1'
     else:
         os.makedirs(childpath)
         return '0'
+
+# 创建个股文件夹(csv、excel、json)
+def create_file(basicpath):
+    fileFlag = get_file_exist(basicpath, 'main')
+    if fileFlag == '0':
+        csvFlag = get_file_exist(basicpath, 'csv')
+        if csvFlag == '0':
+            excelFlag = get_file_exist(basicpath, 'excel')
+            if excelFlag == '0':
+                josnFlag = get_file_exist(basicpath, 'json')
         
 # 股票拼接规则修改（baostock）：600000.SH改为sh.600000
 def stock_com(code):
@@ -78,6 +90,19 @@ def save_json(name, stock, type):
     else:
         with open(josnpath,'w+',encoding="utf-8") as write_j:
             write_j.write(json.dumps(parsed, indent=4))
+    return parsed
+
+# 同时存储cvs、excel、json,返回json数据,type是否为"data"
+def save_all(basicpath, code, show_time, stock, type):
+    # 存储csv文件
+    csv_name = basicpath + '/csv/' + code + '_' + show_time + '.csv'
+    save_csv(csv_name, stock)
+    # 存储excel文件
+    excel_name = basicpath + '/excel/' + code + "_" + show_time + ".xlsx"
+    save_excel(excel_name, stock)
+    # 转为json存储
+    json_name = basicpath + '/json/' + code + "_" + show_time + ".json"
+    parsed = save_json(json_name,stock,type)
     return parsed
 
 @app.route('/stock/get_daily', methods=['POST', 'GET'])
@@ -142,22 +167,9 @@ def get_stock_basic():
 #    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
     show_time = today_time()
     # 创建个股文件夹
-    fileFlag = get_file_exist(basicpath, 'main')
-    if fileFlag == '0':
-        csvFlag = get_file_exist(basicpath, 'csv')
-        if csvFlag == '0':
-            excelFlag = get_file_exist(basicpath, 'excel')
-            if excelFlag == '0':
-                josnFlag = get_file_exist(basicpath, 'json')
-    # 存储csv文件
-    csv_name = basicpath + '/csv/' + code + '_' + show_time + '.csv'
-    save_csv(csv_name, stock)
-    # 存储excel文件
-    excel_name = basicpath + '/excel/' + code + "_" + show_time + ".xlsx"
-    save_excel(excel_name, stock)
-    # 转为json存储
-    json_name = basicpath + '/json/' + code + "_" + show_time + ".json"
-    parsed = save_json(json_name,stock,'data')
+    create_file(basicpath)
+    # 存储csv、excel、josn文件
+    parsed = save_all(basicpath, code, show_time, stock, 'data')
     # 从json获取数据（首页默认展示n条数据）
     all_len = len(parsed)
     show_data = parsed[0:page_size]
@@ -216,6 +228,8 @@ def get_adj_factors():
 @app.route('/stock/get_adj_factor', methods=['POST', 'GET'])
 # 查询复权因子（不定期）——baostock(sh.600000,2015-01-01)
 def get_adj_factor():
+    # baostock登录
+    lg = bs.login()
     param = request.form;
     if param['code']:
         # sh.600000(600000.SH)
@@ -235,8 +249,6 @@ def get_adj_factor():
     # 保存路径
     basepath = os.path.dirname(__file__)
     basicpath = 'static/perstock/' + code
-#    today = datetime.date.today()
-#    show_time = datetime.datetime.strftime(today,'%Y-%m-%d')
     show_time = today_time()
     fileFlag = get_file_exist(basicpath, 'main')
     factorFlag = get_file_exist(basicpath, 'factor')
@@ -247,11 +259,15 @@ def get_adj_factor():
     parsed = save_json(json_name,result_factor, 'com')
     all_len = len(parsed)
     show_obj = {"data": parsed, "total": all_len, "type": "factorList"}
+    # baostock登出
+    bs.logout()
     return show_obj
     
-@app.route('/stock/get_per_k_data', methods=['POST', 'GET'])
+@app.route('/stock/get_per_kline', methods=['POST', 'GET'])
 # 查询个股（A股）k线——baostock(sh.600000,2015-01-01)
-def get_per_k_data():
+def get_per_kline():
+    # baostock相关设置
+    lg = bs.login()
     param = request.form;
     if param['code']:
         # sh.600000(600000.SH)
@@ -259,8 +275,47 @@ def get_per_k_data():
     if param['begin']:
         # 2015-01-01
         begin = param['begin']
+    if param['end']:
+        # 2015-01-01
+        end = param['end']
+    show_code = stock_com(code)
+    # frequency:默认为d，日k线；d=日k线、w=周、m=月、5=5分钟、15=15分钟、30=30分钟、60=60分钟k线数据
+    # adjustflag：复权类型，默认不复权：3；1：后复权；2：前复权
+    rs = bs.query_history_k_data_plus(show_code,"date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST",start_date=begin, end_date=end,frequency="d", adjustflag="3")
+    data_list = []
+    while (rs.error_code == '0') & rs.next():
+        # 获取一条记录，将记录合并在一起
+        data_list.append(rs.get_row_data())
+    result = pd.DataFrame(data_list, columns=rs.fields)
+    basepath = os.path.dirname(__file__)
+    basicpath = 'static/perkstock/' + code
+    show_time = today_time()
+    # 创建个股文件夹
+    create_file(basicpath)
+    # 存储csv、excel、json文件
+    parsed = save_all(basicpath, code, show_time, result, 'data')
+    # 从json获取数据(all)
+    all_len = len(parsed)
+    show_obj = {"data": parsed, "total": all_len, "type": "perKline"}
+    # baostock登出
+    bs.logout()
+    return show_obj
     
-
+# 从sinajs获取实时行情(sh600000)
+@app.route('/stock/get_per_real', methods=['POST', 'GET'])
+def get_per_real():
+    param = request.form;
+    if param['code']:
+        # 600000.SH
+        code = param['code']
+    codelist = code.split('.', 1 )
+    show_code = codelist[1].lower() + codelist[0]
+    url = 'http://hq.sinajs.cn/list=' + show_code
+    response = urllib.request.urlopen(url)
+    html = response.read().decode('GBK',"ignore")
+    return html
+    return 'save-real'
+    
 
 if __name__ =="__main__":
     app.run(
