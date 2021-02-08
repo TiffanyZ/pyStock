@@ -16,3 +16,6 @@ Stock related Python code
 
 2021-02-04
 ## 方法整理，提取部分方法
+
+2021-02-07
+## 新增获取实时行情接口get_per_real
