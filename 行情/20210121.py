@@ -18,6 +18,8 @@ app = Flask(__name__)
 # tushare相关设置
 ts.set_token("***")
 pro = ts.pro_api()
+# baostock相关设置
+#lg = bs.login()
 
 # 公共方法
 # 文件夹是否存在，不存在则创建
@@ -54,9 +56,16 @@ def create_file(basicpath):
         
 # 股票拼接规则修改（baostock）：600000.SH改为sh.600000
 def stock_com(code):
-    codelist = code.split('.', 1 )
-    show_code = codelist[1].lower() + '.' + codelist[0]
-    return show_code
+    if code:
+        codelist = code.split('.', 1 )
+        lens = len(codelist)
+        if lens > 1:
+            show_code = codelist[1].lower() + '.' + codelist[0]
+        else:
+            show_code = "-2"# -2为空，-1为全部
+        return show_code
+    else:
+        return "-1"
     
 # 获取当前时间，数据保存名称中使用（per）
 def today_time():
@@ -91,6 +100,17 @@ def save_json(name, stock, type):
         with open(josnpath,'w+',encoding="utf-8") as write_j:
             write_j.write(json.dumps(parsed, indent=4))
     return parsed
+    
+# 获取json数据
+def get_json(name):
+    basepath = os.path.dirname(__file__)
+    josnpath = os.path.join(basepath,name)
+#    file_data = open(josnpath,'r+',encoding="utf-8")
+    with open(josnpath,'r+',encoding="utf-8") as load_f:
+        load_file = load_f.read()
+        home_file = json.loads(load_file, strict=False)
+        home_file['key'] = new_id
+    return json.loads(file_data.read(), strict=False)
 
 # 同时存储cvs、excel、json,返回json数据,type是否为"data"
 def save_all(basicpath, code, show_time, stock, type):
@@ -104,6 +124,68 @@ def save_all(basicpath, code, show_time, stock, type):
     json_name = basicpath + '/json/' + code + "_" + show_time + ".json"
     parsed = save_json(json_name,stock,type)
     return parsed
+    
+# baostock中返回数据解析DataFrame
+def res_data(res):
+    data_list = []
+    while (res.error_code == '0') & res.next():
+        # 获取一条记录，将记录合并在一起
+        data_list.append(res.get_row_data())
+    result = pd.DataFrame(data_list, columns=res.fields)
+    return result
+    
+# baostock获取成分股（hs300成分股、上证50成分股、中证500成分股）
+def get_constituent_stock(i):
+    basepath = os.path.dirname(__file__)
+    basicpath = 'static/morestock/' + i + '-stock'
+    show_time = today_time()
+    param = request.form;
+    show_code = ""
+    if param and (param['code'] or param['code'] == ""):
+        code = param['code']
+        show_code = stock_com(code)
+    if show_code == "":
+        # baostock相关设置
+        lg = bs.login()
+        if i == "hs300":
+            rs = bs.query_hs300_stocks()
+        elif i == "sz":
+            rs = bs.query_sz50_stocks()
+        elif i == "zz":
+            rs = bs.query_zz500_stocks()
+        result = res_data(rs)
+        # 创建个股文件夹
+        create_file(basicpath)
+        # 存储csv、excel、josn文件
+        parsed = save_all(basicpath, i, show_time, result, 'data')
+        # 从json获取数据(all)
+        all_len = len(parsed)
+        type_name = i + "Stock"
+        show_obj = {"data": parsed, "total": all_len, "type": type_name}
+        # baostock登出
+        bs.logout()
+        return show_obj
+    else:
+        jsonpath = basicpath + '/json/' + i + '_' + show_time + '.json'
+        joson_file = os.path.join(basepath,jsonpath)
+        jsonFlag = "0"
+        search_arr = []
+        with open(joson_file,'r+',encoding="utf-8") as load_f:
+            load_file = load_f.read()
+            home_file = json.loads(load_file, strict=False)
+            if show_code == "-1":
+                search_arr = home_file['data']
+            elif show_code == "-2":
+                search_arr = []
+            else:
+                for item in home_file['data']:
+                    if item['code'] == show_code or item['code_name'] == show_code:
+                        jsonFlag = "1"
+                        search_arr.append(item)
+        all_len = len(search_arr)
+        type_name = i + "Stock"
+        show_obj = {"data": search_arr, "total": all_len, "type": type_name}
+        return show_obj
 
 @app.route('/stock/get_daily', methods=['POST', 'GET'])
 # 获取所有股票当日数据（all）——tushare
@@ -147,18 +229,18 @@ def sleep_daily():
             time.sleep(86400-int(now_min)*60)
             
 @app.route('/stock/get_stock_basic', methods=['POST', 'GET'])
-# 查询某一时间段个股数据（未复权行情）——tushare
+# 查询某一时间段个股数据（未复权行情）——tushare:入参：600519.SH，20210121
 def get_stock_basic():
     param = request.form;
-    if param['code']:
+    if param and param['code']:
         # 600519.SH
         code = param['code']
-    if param['begin']:
+    if param and param['begin']:
         # 20210121
         begin = param['begin']
-    if param['end']:
+    if param and param['end']:
         end = param['end']
-    if param['page_size']:
+    if param and param['page_size']:
         page_size = int(param['page_size'])
     stock = pro.daily(ts_code=code, start_date=begin, end_date=end)
     basepath = os.path.dirname(__file__)
@@ -177,15 +259,15 @@ def get_stock_basic():
     return show_obj
 
 @app.route('/stock/get_stock_basic_page', methods=['POST', 'GET'])
-# 分页，查询某一时间段个股数据（未复权行情）——tushare
+# 分页，查询某一时间段个股数据（未复权行情）——tushare，入参：600519.SH，1，5
 def get_stock_basic_page():
     param = request.form;
-    if param['code']:
+    if param and param['code']:
         # 600519.SH
         code = param['code']
-    if param['page_no']:
+    if param and param['page_no']:
         page_no = int(param['page_no'])
-    if param['page_size']:
+    if param and param['page_size']:
         page_size = int(param['page_size'])
     basepath = os.path.dirname(__file__)
     basicpath = 'static/perstock/' + code
@@ -205,12 +287,12 @@ def get_stock_basic_page():
     return show_obj
 
 
-# 查询复权因子(积分权限限制未使用——tushare)
+# 查询复权因子(积分权限限制未使用——tushare)，入参：600000.SH，20210201
 def get_adj_factors():
     param = request.form;
-    if param['code']:
+    if param and param['code']:
         code = param['code']
-    if param['date']:
+    if param and param['date']:
         date = param['date']
     stock = pro.adj_factor(ts_code=code, trade_date=date)
     basepath = os.path.dirname(__file__)
@@ -226,18 +308,18 @@ def get_adj_factors():
     return 'save-factor'
 
 @app.route('/stock/get_adj_factor', methods=['POST', 'GET'])
-# 查询复权因子（不定期）——baostock(sh.600000,2015-01-01)
+# 查询复权因子（不定期）——baostock(入参：sh.600000,2015-01-01)
 def get_adj_factor():
     # baostock登录
     lg = bs.login()
     param = request.form;
-    if param['code']:
+    if param and param['code']:
         # sh.600000(600000.SH)
         code = param['code']
-    if param['begin']:
+    if param and param['begin']:
         # 2015-01-01
         begin = param['begin']
-    if param['end']:
+    if param and param['end']:
         # 2015-01-01
         end = param['end']
     rs_list = []
@@ -264,29 +346,25 @@ def get_adj_factor():
     return show_obj
     
 @app.route('/stock/get_per_kline', methods=['POST', 'GET'])
-# 查询个股（A股）k线——baostock(sh.600000,2015-01-01)
+# 查询个股（A股）k线——baostock(入参：sh.600000,2015-01-01)
 def get_per_kline():
     # baostock相关设置
     lg = bs.login()
     param = request.form;
-    if param['code']:
+    if param and param['code']:
         # sh.600000(600000.SH)
         code = param['code']
-    if param['begin']:
+    if param and param['begin']:
         # 2015-01-01
         begin = param['begin']
-    if param['end']:
+    if param and param['end']:
         # 2015-01-01
         end = param['end']
     show_code = stock_com(code)
     # frequency:默认为d，日k线；d=日k线、w=周、m=月、5=5分钟、15=15分钟、30=30分钟、60=60分钟k线数据
     # adjustflag：复权类型，默认不复权：3；1：后复权；2：前复权
     rs = bs.query_history_k_data_plus(show_code,"date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,isST",start_date=begin, end_date=end,frequency="d", adjustflag="3")
-    data_list = []
-    while (rs.error_code == '0') & rs.next():
-        # 获取一条记录，将记录合并在一起
-        data_list.append(rs.get_row_data())
-    result = pd.DataFrame(data_list, columns=rs.fields)
+    result = res_data(rs)
     basepath = os.path.dirname(__file__)
     basicpath = 'static/perkstock/' + code
     show_time = today_time()
@@ -301,11 +379,11 @@ def get_per_kline():
     bs.logout()
     return show_obj
     
-# 从sinajs获取实时行情(sh600000)
+# 从sinajs获取实时行情(入参：600000.SH，目标参数sh600000)
 @app.route('/stock/get_per_real', methods=['POST', 'GET'])
 def get_per_real():
     param = request.form;
-    if param['code']:
+    if param and param['code']:
         # 600000.SH
         code = param['code']
     codelist = code.split('.', 1 )
@@ -316,6 +394,23 @@ def get_per_real():
     return html
     return 'save-real'
     
+# 获取沪深300成分股(更新频率：每周一更新)：支持全量查询&个股搜索（入参：600000.SH）
+@app.route('/stock/get_hs300_stock', methods=['POST', 'GET'])
+def get_hs300_stock():
+    show_obj = get_constituent_stock("hs300")
+    return show_obj
+        
+# 获取上证50成分股(更新频率：每周一更新)：支持全量查询&个股搜索（入参：600000.SH）
+@app.route('/stock/get_sz_stock', methods=['POST', 'GET'])
+def get_sz_stock():
+    show_obj = get_constituent_stock("sz")
+    return show_obj
+
+# 获取中证500成分股(更新频率：每周一更新)：支持全量查询&个股搜索（入参：600000.SH）
+@app.route('/stock/get_zz_stock', methods=['POST', 'GET'])
+def get_zz_stock():
+    show_obj = get_constituent_stock("zz")
+    return show_obj
 
 if __name__ =="__main__":
     app.run(
